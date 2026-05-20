@@ -1,0 +1,899 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Search, Bell, ChevronRight, ChevronLeft, Play, Plus, Check, ThumbsUp, Share2, MessageSquare, ArrowLeft, Home, LayoutGrid, Bookmark, Send, X, User, Settings, LogOut, MessageCircle, Lock, Edit2, Trash2, Rewind, FastForward, SkipForward, Pause, Monitor, Volume2 } from 'lucide-react';
+
+// --- FIREBASE IMPORTS ---
+import { initializeApp } from "firebase/app";
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "firebase/auth";
+import { getFirestore, collection, doc, getDoc, setDoc, getDocs, onSnapshot, updateDoc, deleteDoc, increment } from "firebase/firestore";
+
+// --- FIREBASE CONFIG (Sua Configuração) ---
+const firebaseConfig = {
+  apiKey: "AIzaSyDLGgSoNwLy_f6FRG3jHmlNJ5AIb9MC7fs",
+  authDomain: "mango-anime.firebaseapp.com",
+  projectId: "mango-anime",
+  storageBucket: "mango-anime.firebasestorage.app",
+  messagingSenderId: "269303739791",
+  appId: "1:269303739791:web:bee162ff744b83e41187fa"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// --- HELPERS ---
+const IMG_BASE = "https://image.tmdb.org/t/p/original";
+const IMG_POSTER = "https://image.tmdb.org/t/p/w500";
+const resolveImg = (path, isPoster = false) => {
+  if (!path) return 'https://via.placeholder.com/500x750?text=Sem+Capa';
+  if (path.startsWith('http')) return path;
+  return isPoster ? `${IMG_POSTER}${path}` : `${IMG_BASE}${path}`;
+};
+const decodeB64 = (str) => {
+  if (!str || str === 'none') return '';
+  try { return decodeURIComponent(atob(str)); } catch(e) { return ''; }
+};
+const formatTime = (ms) => {
+  if (ms < 0) return "00:00";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
+
+// ==========================================
+// COMPONENTES COMPARTILHADOS
+// ==========================================
+
+const UserAvatar = ({ size = "sm", url, frameUrl }) => {
+  const isLg = size === "lg";
+  const boxSize = isLg ? 'w-32 h-32' : 'w-10 h-10';
+  const imgSize = isLg ? 'w-24 h-24' : 'w-8 h-8';
+  
+  return (
+    <div className={`relative ${boxSize} flex items-center justify-center cursor-pointer group`}>
+       <img 
+         src={url || 'https://ui-avatars.com/api/?name=User&background=151C2C&color=F8FAFC&size=200'} 
+         alt="Avatar" 
+         className={`${imgSize} rounded-full object-cover border-2 border-[#050505] shadow-lg transition-transform group-hover:scale-105`} 
+       />
+       {frameUrl && (
+         <img src={frameUrl} alt="Frame" className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+       )}
+    </div>
+  );
+};
+
+const AppStyleBadge = ({ text, className = "" }) => {
+  const parts = text.split("|").map(s => s.trim());
+  return (
+    <div className={`flex rounded overflow-hidden border border-white/20 w-max shadow-lg ${className}`}>
+       <div className="bg-white px-2 py-0.5 flex items-center justify-center">
+         <span className="text-black text-[9px] font-black uppercase">{parts[0]}</span>
+       </div>
+       {parts.length > 1 && (
+         <div className="bg-black px-2 py-0.5 flex items-center justify-center">
+           <span className="text-white text-[9px] font-black uppercase">{parts[1]}</span>
+         </div>
+       )}
+    </div>
+  );
+};
+
+const Navbar = ({ currentView, handleNav, activeProfile, onLogout }) => {
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => setIsScrolled(window.scrollY > 10);
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const NavButton = ({ view, label }) => (
+    <button 
+      onClick={() => handleNav(view)} 
+      className={`px-5 py-1.5 rounded-full text-sm font-medium transition ${
+        currentView === view ? 'bg-white text-black font-semibold shadow-md' : 'bg-white/5 hover:bg-white/20 text-white'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <>
+      <nav className={`fixed top-0 w-full z-40 transition-all duration-300 px-4 md:px-12 py-4 md:py-5 flex items-center justify-between ${isScrolled ? 'bg-[#050505] shadow-lg border-b border-white/5' : 'bg-gradient-to-b from-[#050505]/90 to-transparent'}`}>
+        <div className="flex items-center text-white cursor-pointer" onClick={() => handleNav('home')}>
+          <span className="text-xl md:text-2xl font-black tracking-tighter hover:scale-105 transition-transform">
+            MANGO<span className="text-orange-500">VS</span>
+          </span>
+        </div>
+
+        <div className="hidden md:flex items-center gap-3 absolute left-1/2 -translate-x-1/2">
+          <NavButton view="home" label="Início" />
+          <NavButton view="catalog" label="Catálogo" />
+          <NavButton view="mylist" label="Minha Lista" />
+        </div>
+
+        <div className="flex items-center gap-4 md:gap-6 text-white">
+          <button onClick={() => handleNav('search')} className={`transition hover:text-gray-300 ${currentView === 'search' ? 'text-orange-500' : ''}`}>
+            <Search size={20} />
+          </button>
+          <button onClick={() => handleNav('profile')}>
+             <UserAvatar size="sm" url={activeProfile?.avatarUrl} frameUrl={activeProfile?.frameUrl} />
+          </button>
+        </div>
+      </nav>
+
+      {/* Mobile Bottom Nav */}
+      <div className="md:hidden fixed bottom-0 w-full z-40 bg-[#050505]/95 backdrop-blur-md border-t border-white/10 flex items-center justify-around py-3 px-2 pb-safe">
+        <button onClick={() => handleNav('home')} className={`flex flex-col items-center gap-1 ${currentView === 'home' ? 'text-white' : 'text-gray-500'}`}>
+          <Home size={20} /> <span className="text-[10px] font-medium">Início</span>
+        </button>
+        <button onClick={() => handleNav('catalog')} className={`flex flex-col items-center gap-1 ${currentView === 'catalog' ? 'text-white' : 'text-gray-500'}`}>
+          <LayoutGrid size={20} /> <span className="text-[10px] font-medium">Catálogo</span>
+        </button>
+        <button onClick={() => handleNav('mylist')} className={`flex flex-col items-center gap-1 ${currentView === 'mylist' ? 'text-white' : 'text-gray-500'}`}>
+          <Bookmark size={20} /> <span className="text-[10px] font-medium">Lista</span>
+        </button>
+      </div>
+    </>
+  );
+};
+
+// ==========================================
+// TELAS DE AUTENTICAÇÃO E PERFIL
+// ==========================================
+
+const LoginScreen = () => {
+  const [loading, setLoading] = useState(false);
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      await setDoc(doc(db, "users", result.user.uid), { 
+        email: result.user.email, lastLogin: Date.now() 
+      }, { merge: true });
+    } catch (err) {
+      alert("Erro ao fazer login: " + err.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center p-6 relative overflow-hidden">
+       <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#111520] pointer-events-none" />
+       <div className="relative z-10 flex flex-col items-center max-w-sm w-full">
+         <span className="text-5xl font-black tracking-tighter text-white mb-6">MANGO<span className="text-orange-500">VS</span></span>
+         <p className="text-gray-400 text-center text-sm mb-12">Milhares de episódios esperando por você.<br/>Faça login para continuar.</p>
+         
+         <button 
+           onClick={handleGoogleLogin} 
+           disabled={loading}
+           className="w-full bg-white text-black py-4 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-gray-200 transition disabled:opacity-50"
+         >
+           {loading ? <div className="w-6 h-6 border-2 border-black border-t-transparent rounded-full animate-spin" /> : (
+             <>
+               <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+               Entrar com Google
+             </>
+           )}
+         </button>
+       </div>
+    </div>
+  );
+};
+
+const ProfilesScreen = ({ user, onSelectProfile, onLogout }) => {
+  const [profiles, setProfiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [pinDialog, setPinDialog] = useState(null);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(collection(db, "users", user.uid, "profiles"), (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setProfiles(list);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [user]);
+
+  const handleProfileClick = (p) => {
+    if (p.pin) { setPinDialog(p); setPin(''); setPinError(false); }
+    else { onSelectProfile(p); }
+  };
+
+  const submitPin = () => {
+    if (pin === pinDialog.pin) { onSelectProfile(pinDialog); setPinDialog(null); }
+    else { setPinError(true); setPin(''); }
+  };
+
+  if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-white">Carregando...</div>;
+
+  return (
+    <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center relative">
+      <h1 className="text-3xl font-bold text-white mb-10">Quem está assistindo?</h1>
+      
+      <div className="flex gap-6 flex-wrap justify-center max-w-3xl px-6">
+        {profiles.map(p => (
+          <div key={p.id} className="flex flex-col items-center group cursor-pointer" onClick={() => handleProfileClick(p)}>
+             <div className="relative">
+               <UserAvatar size="lg" url={p.avatarUrl} frameUrl={p.frameUrl} />
+               {p.pin && (
+                 <div className="absolute -bottom-2 right-1/2 translate-x-1/2 bg-black/80 p-1.5 rounded-md">
+                   <Lock size={12} className="text-white" />
+                 </div>
+               )}
+             </div>
+             <span className="mt-4 text-gray-400 font-medium group-hover:text-white transition">{p.name}</span>
+          </div>
+        ))}
+        
+        {profiles.length < 4 && (
+          <div className="flex flex-col items-center group cursor-pointer" onClick={() => onSelectProfile('new')}>
+            <div className="w-32 h-32 flex items-center justify-center bg-white/5 border border-white/10 rounded-full group-hover:bg-white/10 transition">
+              <Plus size={48} className="text-gray-400 group-hover:text-white" />
+            </div>
+            <span className="mt-4 text-gray-400 font-medium group-hover:text-white transition">Novo Perfil</span>
+          </div>
+        )}
+      </div>
+
+      <button onClick={onLogout} className="mt-16 text-gray-500 hover:text-white transition">Sair da Conta</button>
+
+      {/* Modal de PIN */}
+      {pinDialog && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+           <div className="bg-[#18181B] border border-white/10 p-8 rounded-2xl flex flex-col items-center w-[320px]">
+              <h2 className="text-xl font-bold text-white mb-6">Digite o PIN</h2>
+              <input 
+                type="password" 
+                maxLength={4} 
+                autoFocus
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                className={`w-full bg-white/5 border text-center text-3xl tracking-[1em] py-4 rounded-xl text-white outline-none transition ${pinError ? 'border-red-500' : 'border-white/10 focus:border-white/30'}`}
+              />
+              {pinError && <span className="text-red-500 text-xs mt-2">PIN Incorreto.</span>}
+              
+              <div className="flex w-full gap-3 mt-8">
+                <button onClick={() => setPinDialog(null)} className="flex-1 py-3 text-gray-400 hover:text-white font-medium">Cancelar</button>
+                <button onClick={submitPin} disabled={pin.length < 4} className="flex-1 py-3 bg-white text-black font-bold rounded-xl disabled:opacity-50">Entrar</button>
+              </div>
+           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==========================================
+// TELA DO REPRODUTOR (PLAYER HTML5 CUSTOMIZADO)
+// ==========================================
+
+const PlayerScreen = ({ contentId, episodeId, initialUrl, altUrl, title, startPos, onBack }) => {
+  const videoRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [duration, setDuration] = useState(0);
+  const [currentPos, setCurrentPos] = useState(startPos || 0);
+  const [showControls, setShowControls] = useState(true);
+  const [activeMenu, setActiveMenu] = useState(null); // 'audio', 'speed'
+  
+  const hasAlt = altUrl && altUrl !== 'none';
+  const hasMain = initialUrl && initialUrl !== 'none';
+  const [useAlt, setUseAlt] = useState(!hasMain && hasAlt);
+  const [speed, setSpeed] = useState(1);
+
+  const controlsTimeout = useRef(null);
+
+  const handlePlayPause = () => {
+    if (videoRef.current.paused) videoRef.current.play();
+    else videoRef.current.pause();
+  };
+
+  const handleSeek = (amountMs) => {
+    videoRef.current.currentTime = Math.max(0, Math.min(duration, videoRef.current.currentTime + (amountMs / 1000)));
+  };
+
+  const resetControlsTimeout = () => {
+    setShowControls(true);
+    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    if (isPlaying && !activeMenu) {
+      controlsTimeout.current = setTimeout(() => setShowControls(false), 4000);
+    }
+  };
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = startPos / 1000;
+      videoRef.current.play().catch(e => console.log("Auto-play blocked"));
+    }
+  }, [startPos]);
+
+  useEffect(() => {
+    resetControlsTimeout();
+    return () => clearTimeout(controlsTimeout.current);
+  }, [isPlaying, activeMenu]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      const currentTime = videoRef.current.currentTime;
+      videoRef.current.src = decodeB64(useAlt ? altUrl : initialUrl);
+      videoRef.current.currentTime = currentTime;
+      if (isPlaying) videoRef.current.play();
+      videoRef.current.playbackRate = speed;
+    }
+  }, [useAlt, speed]);
+
+  // Simulador de salvar progresso no Firestore (chamado ao sair)
+  const saveProgress = async () => {
+     // Em um ambiente real, você salvaria currentPos no Firestore aqui baseado no contentId e episodeId.
+     console.log(`Salvando progresso: ${currentPos}ms de ${duration}ms para ${contentId}`);
+     onBack();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black z-50 flex flex-col group" onMouseMove={resetControlsTimeout} onClick={resetControlsTimeout}>
+      <video 
+        ref={videoRef}
+        className="absolute inset-0 w-full h-full object-contain"
+        onTimeUpdate={(e) => setCurrentPos(e.target.currentTime * 1000)}
+        onLoadedMetadata={(e) => setDuration(e.target.duration * 1000)}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        src={decodeB64(useAlt ? altUrl : initialUrl)}
+        onClick={handlePlayPause}
+      />
+
+      {/* Controles Overlay */}
+      <div className={`absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90 transition-opacity duration-300 flex flex-col justify-between ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        
+        {/* Header */}
+        <div className="p-6 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button onClick={saveProgress} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-md transition">
+              <ArrowLeft size={24} />
+            </button>
+            <h2 className="text-white font-bold text-lg">{title}</h2>
+          </div>
+        </div>
+
+        {/* Controles Centrais */}
+        <div className="flex items-center justify-center gap-12 pointer-events-auto">
+           <button onClick={() => handleSeek(-10000)} className="p-4 rounded-full hover:bg-white/10 text-white transition">
+             <Rewind size={32} />
+           </button>
+           <button onClick={handlePlayPause} className="w-20 h-20 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 rounded-full flex items-center justify-center text-white transition">
+             {isPlaying ? <Pause size={40} /> : <Play size={40} className="ml-2" />}
+           </button>
+           <button onClick={() => handleSeek(10000)} className="p-4 rounded-full hover:bg-white/10 text-white transition">
+             <FastForward size={32} />
+           </button>
+        </div>
+
+        {/* Footer Controles */}
+        <div className="p-8 w-full max-w-5xl mx-auto pointer-events-auto">
+           {/* Barra de Progresso HTML Customizada */}
+           <div 
+             className="w-full h-2 bg-white/20 rounded-full mb-6 cursor-pointer relative overflow-hidden group/bar"
+             onClick={(e) => {
+               const rect = e.currentTarget.getBoundingClientRect();
+               const pos = (e.clientX - rect.left) / rect.width;
+               if (videoRef.current) videoRef.current.currentTime = pos * (duration/1000);
+             }}
+           >
+              <div 
+                className="absolute top-0 left-0 h-full bg-orange-500 rounded-full" 
+                style={{ width: `${duration > 0 ? (currentPos / duration) * 100 : 0}%` }}
+              />
+           </div>
+
+           <div className="flex items-center justify-between">
+             <span className="text-white font-medium">{formatTime(currentPos)} / {formatTime(duration)}</span>
+             
+             <div className="flex gap-4 relative">
+               <button onClick={() => setActiveMenu(activeMenu === 'speed' ? null : 'speed')} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-white text-sm font-bold border border-white/10 backdrop-blur-sm transition">
+                 {speed}x
+               </button>
+               {(hasMain && hasAlt) && (
+                 <button onClick={() => setActiveMenu(activeMenu === 'audio' ? null : 'audio')} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-white text-sm font-bold border border-white/10 backdrop-blur-sm transition flex items-center gap-2">
+                   <Volume2 size={16} /> Áudio
+                 </button>
+               )}
+               
+               {/* Menus Flutuantes */}
+               {activeMenu && (
+                 <div className="absolute bottom-full right-0 mb-4 bg-[#111] border border-white/10 p-2 rounded-xl min-w-[200px] shadow-2xl flex flex-col gap-1">
+                   {activeMenu === 'speed' && [0.5, 1, 1.25, 1.5, 2].map(s => (
+                     <button key={s} onClick={() => { setSpeed(s); setActiveMenu(null); }} className={`px-4 py-3 rounded-lg text-left text-sm font-bold transition ${speed === s ? 'bg-white text-black' : 'text-white hover:bg-white/10'}`}>
+                       {s === 1 ? 'Normal' : `${s}x`}
+                     </button>
+                   ))}
+                   {activeMenu === 'audio' && [
+                     { id: false, label: 'Padrão (Dublado)' },
+                     { id: true, label: 'Alternativo (Legendado)' }
+                   ].map(a => (
+                     <button key={a.label} onClick={() => { setUseAlt(a.id); setActiveMenu(null); }} className={`px-4 py-3 rounded-lg text-left text-sm font-bold transition ${useAlt === a.id ? 'bg-white text-black' : 'text-white hover:bg-white/10'}`}>
+                       {a.label}
+                     </button>
+                   ))}
+                 </div>
+               )}
+             </div>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// TELA HOME E CATÁLOGO
+// ==========================================
+
+const HeroSlider = ({ items, onSelect }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (!items || items.length === 0) return;
+    const interval = setInterval(() => setCurrentIndex((prev) => (prev === items.length - 1 ? 0 : prev + 1)), 8000);
+    return () => clearInterval(interval);
+  }, [items]);
+
+  if (!items || items.length === 0) return <div className="h-[80vh] md:h-[90vh] bg-[#050505]"></div>;
+  const item = items[currentIndex];
+
+  return (
+    <div className="relative w-full h-[80vh] md:h-[90vh] flex items-center overflow-hidden bg-[#050505] group">
+      {items.map((it, index) => (
+        <div key={it.id} className={`absolute inset-0 w-full h-full transition-opacity duration-1000 ease-in-out ${index === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
+          <img src={resolveImg(it.backdrop || it.poster)} alt={it.title} className="w-full h-full object-cover object-top" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#050505] via-[#050505]/90 md:via-[#050505]/60 to-transparent w-full md:w-3/4"></div>
+          <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/30 to-transparent"></div>
+        </div>
+      ))}
+
+      <div className="relative z-20 w-full px-6 md:px-16 pt-20 flex justify-between items-center">
+        <div className="max-w-2xl">
+          <h1 className="text-white font-black text-4xl md:text-6xl uppercase tracking-tighter mb-4 drop-shadow-lg leading-tight" style={{ fontFamily: 'Impact, sans-serif' }}>
+            {item.title}
+          </h1>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold mb-6 text-gray-300">
+            <span className="bg-white/20 text-white px-2 py-0.5 rounded text-[10px]">{item.type === 'tv' ? 'SÉRIE' : 'FILME'}</span>
+            <span className="text-orange-500 text-lg leading-none">•</span>
+            <span>{item.year || (new Date(item.addedAt).getFullYear())}</span>
+            {item.genres?.length > 0 && (
+              <>
+                <span className="text-orange-500 text-lg leading-none">•</span>
+                <span>{item.genres.slice(0, 2).join(' • ')}</span>
+              </>
+            )}
+          </div>
+
+          <p className="text-gray-300 text-xs md:text-base mb-8 leading-relaxed max-w-md line-clamp-3">
+            {item.synopsis || "Nenhuma sinopse disponível para esta obra."}
+          </p>
+
+          <div className="flex gap-4">
+            <button onClick={() => onSelect(item, true)} className="bg-white text-black px-6 py-3 rounded-xl hover:bg-gray-200 transition flex items-center justify-center gap-2 font-bold text-sm shadow-lg w-full md:w-auto">
+              <Play size={18} fill="currentColor" /> Assistir
+            </button>
+            <button onClick={() => onSelect(item)} className="bg-white/10 text-white px-6 py-3 rounded-xl border border-white/20 hover:bg-white/20 transition flex items-center justify-center gap-2 font-bold text-sm w-full md:w-auto">
+               Detalhes
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <div className="absolute bottom-10 right-10 z-30 hidden md:flex gap-2">
+        {items.map((_, index) => (
+          <button key={index} onClick={() => setCurrentIndex(index)} className={`w-2 h-2 rounded-full transition-all ${index === currentIndex ? 'bg-white w-6' : 'bg-gray-600 hover:bg-gray-400'}`} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const VerticalMovieRow = ({ title, items, onSelect, isNumbered = false }) => {
+  const rowRef = useRef(null);
+  const scroll = (dir) => rowRef.current?.scrollBy({ left: dir === 'left' ? -300 : 300, behavior: 'smooth' });
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="mb-10 px-4 md:px-12 group relative">
+      <h2 className="text-lg md:text-xl font-bold text-white mb-4 flex items-center gap-2">
+        {title} <ChevronRight size={18} className="text-gray-500" />
+      </h2>
+
+      <button onClick={() => scroll('left')} className="hidden md:flex absolute left-0 top-10 bottom-0 z-40 w-12 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-[#050505] to-transparent">
+        <ChevronLeft className="text-white hover:scale-125 transition" size={32} />
+      </button>
+
+      <div ref={rowRef} className="flex gap-3 overflow-x-auto scrollbar-hide pb-4 snap-x" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {items.map((item, index) => (
+          <div key={item.id} onClick={() => onSelect(item)} className={`relative flex-none ${isNumbered ? 'w-[180px] h-[190px]' : 'w-[130px] md:w-[150px] aspect-[2/3]'} rounded-xl overflow-hidden cursor-pointer snap-start bg-[#1a1a1a] group/card shadow-lg`}>
+            
+            {isNumbered ? (
+               <div className="w-full h-full relative flex justify-end">
+                  <div className="w-[120px] h-full relative">
+                    <img src={resolveImg(item.poster, true)} alt={item.title} className="w-full h-full object-cover rounded-xl transition-transform duration-500 group-hover/card:scale-105" loading="lazy" />
+                    {item.badgeText && <AppStyleBadge text={item.badgeText} className="absolute bottom-2 left-1/2 -translate-x-1/2" />}
+                  </div>
+                  <div className="absolute bottom-0 left-[-10px]">
+                    <span className="text-[120px] font-black text-black" style={{ WebkitTextStroke: '4px white' }}>{index + 1}</span>
+                  </div>
+               </div>
+            ) : (
+               <>
+                 <img src={resolveImg(item.poster, true)} alt={item.title} className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110" loading="lazy" />
+                 <div className="absolute inset-0 bg-black/0 group-hover/card:bg-black/40 transition-colors duration-300"></div>
+                 {item.badgeText && <AppStyleBadge text={item.badgeText} className="absolute bottom-2 left-1/2 -translate-x-1/2" />}
+               </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <button onClick={() => scroll('right')} className="hidden md:flex absolute right-0 top-10 bottom-0 z-40 w-12 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-[#050505] to-transparent">
+        <ChevronRight className="text-white hover:scale-125 transition" size={32} />
+      </button>
+    </div>
+  );
+};
+
+// ==========================================
+// TELA DETALHES
+// ==========================================
+
+const DetailsScreen = ({ item, onBack, onPlay, comments = [], onAddComment, activeProfile }) => {
+  const [activeSeason, setActiveSeason] = useState(1);
+  const [commentText, setCommentText] = useState("");
+  const [showComments, setShowComments] = useState(false);
+
+  useEffect(() => { window.scrollTo(0, 0); }, [item]);
+
+  const uniqueSeasons = Array.from(new Set(item.episodes?.map(e => e.seasonNumber) || []));
+  const currentEpisodes = item.episodes?.filter(e => e.seasonNumber === activeSeason) || [];
+
+  return (
+    <div className="min-h-screen bg-[#050505] pb-24 md:pb-20 overflow-x-hidden animate-fade-in relative">
+      <div className="absolute top-0 left-0 w-full h-[60vh] md:h-[85vh] z-0">
+         <img src={resolveImg(item.backdrop || item.poster)} className="w-full h-full object-cover object-top opacity-50" />
+         <div className="absolute inset-0 bg-gradient-to-r from-[#050505] via-[#050505]/90 to-transparent w-full md:w-3/4"></div>
+         <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/40 to-transparent"></div>
+      </div>
+
+      <div className="relative z-10 px-4 md:px-16 pt-20 md:pt-32">
+        <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-2 mb-8 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full w-max transition">
+          <ArrowLeft size={20} /> <span className="text-sm font-bold">Voltar</span>
+        </button>
+
+        <div className="max-w-2xl">
+          <h1 className="text-white font-black text-4xl md:text-6xl uppercase tracking-tighter mb-4 drop-shadow-lg" style={{ fontFamily: 'Impact, sans-serif' }}>
+            {item.title}
+          </h1>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs font-bold mb-6 text-gray-300">
+            <span className="bg-orange-500 text-white px-2 py-0.5 rounded text-[10px]">{item.type === 'tv' ? 'SÉRIE' : 'FILME'}</span>
+            <span className="text-gray-500">•</span>
+            <span>{item.year}</span>
+            <span className="text-gray-500">•</span>
+            <span>{item.genres?.join(' • ')}</span>
+          </div>
+
+          <p className="text-gray-300 text-sm md:text-base leading-relaxed mb-8">
+            {item.synopsis || "Descrição não disponível."}
+          </p>
+
+          <div className="flex flex-wrap items-center gap-4 mb-12">
+            <button onClick={() => onPlay(item)} className="bg-white text-black px-8 py-3.5 rounded-xl hover:bg-gray-200 transition flex items-center gap-2 font-black text-sm shadow-lg">
+              <Play size={20} fill="currentColor" /> ASSISTIR
+            </button>
+            <button onClick={() => setShowComments(true)} className="w-12 h-12 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 flex items-center justify-center text-white transition">
+               <MessageSquare size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Lista de Episódios se for TV */}
+        {item.type === 'tv' && uniqueSeasons.length > 0 && (
+          <div className="mt-12">
+             <div className="flex items-center gap-4 mb-6">
+                <select 
+                  value={activeSeason} 
+                  onChange={(e) => setActiveSeason(Number(e.target.value))}
+                  className="bg-[#18181B] text-white border border-white/10 rounded-xl px-4 py-3 font-bold outline-none"
+                >
+                   {uniqueSeasons.map(s => <option key={s} value={s}>Temporada {s}</option>)}
+                </select>
+                <span className="text-gray-500 text-sm font-medium">{currentEpisodes.length} episódios</span>
+             </div>
+
+             <div className="flex flex-col gap-3 max-w-4xl">
+                {currentEpisodes.map(ep => (
+                  <div key={ep.id} onClick={() => onPlay(item, ep)} className="flex items-center gap-4 p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition cursor-pointer group">
+                     <div className="relative w-32 md:w-48 aspect-video rounded-lg overflow-hidden shrink-0">
+                        <img src={resolveImg(ep.thumb || item.backdrop)} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/30 group-hover:bg-transparent transition" />
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                           <div className="p-2 bg-black/60 rounded-full backdrop-blur-md"><Play size={16} fill="white" className="text-white ml-0.5" /></div>
+                        </div>
+                     </div>
+                     <div className="flex-1">
+                        <h4 className="text-white font-bold text-sm md:text-base line-clamp-1">{ep.epNumber}. {ep.title || `Episódio ${ep.epNumber}`}</h4>
+                        <div className="flex items-center gap-2 mt-2">
+                           <span className="text-gray-400 text-xs font-medium">24 min</span>
+                           {(ep.url && ep.altUrl) && <span className="bg-purple-600 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">DUAL</span>}
+                        </div>
+                     </div>
+                  </div>
+                ))}
+             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Drawer de Comentários */}
+      {showComments && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowComments(false)} />
+           <div className="relative w-full max-w-md bg-[#0A0A0A] h-full border-l border-white/10 flex flex-col p-6 animate-slide-in-right">
+              <div className="flex items-center justify-between mb-6">
+                 <div>
+                   <h2 className="text-white font-bold text-xl">Comentários</h2>
+                   <p className="text-gray-500 text-xs">Conversando como {activeProfile?.name}</p>
+                 </div>
+                 <button onClick={() => setShowComments(false)} className="text-gray-400 hover:text-white"><X size={24} /></button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                 {comments.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
+                      <MessageCircle size={32} className="mb-2 opacity-50" />
+                      <p className="text-sm font-medium">Nenhum comentário ainda.</p>
+                    </div>
+                 ) : (
+                    comments.map(c => (
+                      <div key={c.id} className="flex gap-3 bg-[#111] p-3 rounded-xl border border-white/5">
+                        <UserAvatar size="sm" url={c.authorAvatar} frameUrl={c.authorFrameUrl} />
+                        <div>
+                          <div className="flex items-baseline gap-2 mb-1">
+                             <span className="text-white text-xs font-bold">{c.authorName}</span>
+                             <span className="text-gray-500 text-[10px]">{new Date(c.timestamp).toLocaleDateString()}</span>
+                          </div>
+                          <p className="text-gray-300 text-sm leading-relaxed">{c.text}</p>
+                        </div>
+                      </div>
+                    ))
+                 )}
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-white/10">
+                 <div className="flex gap-3 bg-[#18181B] p-2 rounded-xl border border-white/5">
+                    <input 
+                      value={commentText}
+                      onChange={e => setCommentText(e.target.value)}
+                      placeholder="Adicione um comentário..."
+                      className="flex-1 bg-transparent text-sm text-white px-2 outline-none"
+                    />
+                    <button 
+                      onClick={() => { if(commentText.trim()){ onAddComment(commentText); setCommentText(''); } }}
+                      disabled={!commentText.trim()}
+                      className="p-2 bg-orange-600 hover:bg-orange-500 rounded-lg text-white disabled:opacity-50 transition"
+                    >
+                      <Send size={16} />
+                    </button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// ==========================================
+// APLICATIVO PRINCIPAL
+// ==========================================
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [activeProfile, setActiveProfile] = useState(null);
+  const [currentView, setCurrentView] = useState('login'); // login, profiles, home, details, player
+  
+  // Data States (Firestore)
+  const [contents, setContents] = useState([]);
+  const [carousels, setCarousels] = useState([]);
+  const [top10, setTop10] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [comments, setComments] = useState([]); // All comments
+
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [playerData, setPlayerData] = useState(null);
+
+  // 1. Auth Listener
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) { if(!activeProfile) setCurrentView('profiles'); }
+      else { setCurrentView('login'); setActiveProfile(null); }
+    });
+    return () => unsub();
+  }, [activeProfile]);
+
+  // 2. Fetch Data (Somente se logado e perfil selecionado)
+  useEffect(() => {
+    if (!user || !activeProfile) return;
+
+    const unsubs = [];
+    // Conteúdos
+    unsubs.push(onSnapshot(collection(db, "content"), snap => {
+      setContents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }));
+    // Carrosseis Normais
+    unsubs.push(onSnapshot(collection(db, "carousels"), snap => {
+      setCarousels(snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'normal' })));
+    }));
+    // Carrosseis Top 10
+    unsubs.push(onSnapshot(collection(db, "top10_carousels"), snap => {
+      setTop10(snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'top10' })));
+    }));
+    // Comentários (Pegando todos pra simplificar e filtrando no JS como pedido)
+    unsubs.push(onSnapshot(collection(db, "comments"), snap => {
+      setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp - a.timestamp));
+    }));
+    // Histórico Pessoal
+    unsubs.push(onSnapshot(collection(db, "users", user.uid, "profiles", activeProfile.id, "history"), snap => {
+      setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp - a.timestamp));
+    }));
+
+    return () => unsubs.forEach(u => u());
+  }, [user, activeProfile]);
+
+  // Navegação
+  const handleNav = (view, item = null) => {
+    setCurrentView(view);
+    setSelectedItem(item);
+  };
+
+  const handlePlay = (item, ep = null) => {
+    // Lógica inteligente de "Continuar Assistindo"
+    const histItem = history.find(h => h.id === item.id);
+    let targetEp = ep;
+    let startPos = 0;
+
+    if (item.type === 'tv') {
+      if (!targetEp) {
+         if (histItem && histItem.episodeId !== 'none') {
+            targetEp = item.episodes?.find(e => e.id === histItem.episodeId) || item.episodes?.[0];
+            startPos = histItem.progressMs || 0;
+         } else {
+            targetEp = item.episodes?.[0];
+         }
+      } else {
+         if (histItem?.episodeId === targetEp.id) startPos = histItem.progressMs || 0;
+      }
+    } else {
+       if (histItem) startPos = histItem.progressMs || 0;
+    }
+
+    if (!targetEp && item.type === 'tv') { alert("Nenhum episódio disponível."); return; }
+
+    setPlayerData({
+      contentId: item.id,
+      episodeId: targetEp ? targetEp.id : 'none',
+      initialUrl: targetEp ? targetEp.url : item.url,
+      altUrl: targetEp ? targetEp.altUrl : item.altUrl,
+      title: targetEp ? `T${targetEp.seasonNumber}:E${targetEp.epNumber} - ${item.title}` : item.title,
+      startPos: startPos
+    });
+    setCurrentView('player');
+  };
+
+  const handleAddComment = async (text) => {
+    if (!selectedItem) return;
+    const newDocRef = doc(collection(db, "comments"));
+    await setDoc(newDocRef, {
+       contentId: selectedItem.id,
+       uid: user.uid,
+       profileId: activeProfile.id,
+       authorName: activeProfile.name,
+       authorAvatar: activeProfile.avatarUrl || '',
+       authorFrameUrl: activeProfile.frameUrl || '',
+       text: text,
+       timestamp: Date.now()
+    });
+  };
+
+  // Processamento de Dados para a Home
+  const lancamentos = useMemo(() => contents.slice().sort((a, b) => (parseInt(b.year)||0) - (parseInt(a.year)||0) || b.addedAt - a.addedAt).slice(0, 15), [contents]);
+  const recentes = useMemo(() => contents.slice().sort((a, b) => b.addedAt - a.addedAt).slice(0, 15), [contents]);
+  const continueWatching = useMemo(() => history.filter(h => h.progressMs > 0 && h.durationMs > 0 && h.progressMs < (h.durationMs * 0.95)).slice(0, 10), [history]);
+  
+  const dynamicCarousels = useMemo(() => {
+    return [...carousels, ...top10].sort((a,b) => (a.order||99) - (b.order||99)).map(c => {
+      return { ...c, mappedItems: c.items?.map(id => contents.find(cont => cont.id === id)).filter(Boolean) };
+    }).filter(c => c.mappedItems?.length > 0);
+  }, [carousels, top10, contents]);
+
+
+  // Renderização Raiz
+  if (!user && currentView === 'login') return <LoginScreen />;
+  if (user && currentView === 'profiles') return <ProfilesScreen user={user} onSelectProfile={(p) => { setActiveProfile(p); setCurrentView('home'); }} onLogout={() => signOut(auth)} />;
+  if (currentView === 'player' && playerData) return <PlayerScreen {...playerData} onBack={() => { setPlayerData(null); setCurrentView(selectedItem ? 'details' : 'home'); }} />;
+
+  return (
+    <div className="min-h-screen bg-[#050505] font-sans selection:bg-orange-500 selection:text-white">
+      <style dangerouslySetInnerHTML={{__html: `
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        .animate-slide-in-right { animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+      `}} />
+
+      {currentView !== 'player' && (
+        <Navbar currentView={currentView} handleNav={handleNav} activeProfile={activeProfile} onLogout={() => signOut(auth)} />
+      )}
+      
+      <main>
+        {currentView === 'details' && selectedItem && (
+          <DetailsScreen 
+            item={selectedItem} 
+            activeProfile={activeProfile}
+            comments={comments.filter(c => c.contentId === selectedItem.id)}
+            onAddComment={handleAddComment}
+            onBack={() => handleNav('home')} 
+            onPlay={handlePlay} 
+          />
+        )}
+
+        {currentView === 'home' && (
+          <div className="pb-24 animate-fade-in">
+             <HeroSlider items={lancamentos.slice(0, 5)} onSelect={(item, play) => play ? handlePlay(item) : handleNav('details', item)} />
+             
+             <div className="relative z-30 -mt-8">
+               {continueWatching.length > 0 && (
+                 <VerticalMovieRow title="Continuar Assistindo" items={continueWatching.map(h => contents.find(c => c.id === h.id)).filter(Boolean)} onSelect={(item) => handleNav('details', item)} />
+               )}
+               
+               <VerticalMovieRow title="Lançamentos" items={lancamentos} onSelect={(item) => handleNav('details', item)} />
+               <VerticalMovieRow title="Adicionados Recentemente" items={recentes} onSelect={(item) => handleNav('details', item)} />
+
+               {dynamicCarousels.map(car => (
+                 <VerticalMovieRow 
+                   key={car.id} 
+                   title={car.title} 
+                   items={car.mappedItems} 
+                   isNumbered={car.type === 'top10'} 
+                   onSelect={(item) => handleNav('details', item)} 
+                 />
+               ))}
+             </div>
+          </div>
+        )}
+
+        {currentView === 'catalog' && (
+          <div className="pt-32 px-6 pb-24 min-h-screen text-white">
+             <h2 className="text-2xl font-bold mb-6">Catálogo Completo</h2>
+             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+               {contents.map(item => (
+                 <div key={item.id} onClick={() => handleNav('details', item)} className="aspect-[2/3] rounded-xl overflow-hidden cursor-pointer group">
+                   <img src={resolveImg(item.poster, true)} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                 </div>
+               ))}
+             </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
