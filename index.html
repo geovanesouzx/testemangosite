@@ -8,7 +8,7 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Phosphor Icons (Alternativa moderna aos ícones) -->
+    <!-- Phosphor Icons (Ícones modernos) -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     
     <!-- Google Fonts -->
@@ -29,9 +29,8 @@
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
         /* ==========================================
-           ANIMAÇÕES CUSTOMIZADAS (A Mágica acontece aqui)
+           ANIMAÇÕES CUSTOMIZADAS
            ========================================== */
-        
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
         
@@ -48,12 +47,6 @@
         @keyframes scaleIn {
             from { opacity: 0; transform: scale(0.8); }
             to { opacity: 1; transform: scale(1); }
-        }
-
-        @keyframes pulseGlow {
-            0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
-            70% { box-shadow: 0 0 20px 10px rgba(249, 115, 22, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
         }
 
         .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
@@ -80,7 +73,7 @@
             border-color: rgba(249, 115, 22, 0.5);
         }
 
-        /* Título Impact parecido com Netflix/Mango */
+        /* Título Impact */
         .impact-title {
             font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
             letter-spacing: 1px;
@@ -89,7 +82,6 @@
         /* Gestão de Views */
         .view { display: none; }
         .view.active { display: block; animation: fadeIn 0.4s ease-out forwards; }
-        
         #player-view.active { display: flex; }
     </style>
 </head>
@@ -124,10 +116,10 @@
 
     <!-- Mobile Bottom Nav -->
     <div id="mobile-nav" class="md:hidden fixed bottom-0 w-full z-40 bg-[#050505]/95 backdrop-blur-md border-t border-white/10 flex items-center justify-around py-3 px-2 hidden">
-        <button onclick="switchView('home')" class="flex flex-col items-center gap-1 text-gray-500 hover:text-white transition">
+        <button onclick="switchView('home')" class="mobile-nav-btn flex flex-col items-center gap-1 text-white transition" data-target="home">
             <i class="ph-fill ph-house text-xl"></i><span class="text-[10px] font-medium">Início</span>
         </button>
-        <button onclick="switchView('catalog')" class="flex flex-col items-center gap-1 text-gray-500 hover:text-white transition">
+        <button onclick="switchView('catalog')" class="mobile-nav-btn flex flex-col items-center gap-1 text-gray-500 hover:text-white transition" data-target="catalog">
             <i class="ph-fill ph-squares-four text-xl"></i><span class="text-[10px] font-medium">Catálogo</span>
         </button>
     </div>
@@ -355,12 +347,23 @@
                 mobileNav.classList.remove('hidden');
             }
 
-            // Atualiza botões da navbar
+            // Atualiza botões da navbar Desktop
             document.querySelectorAll('.nav-btn').forEach(btn => {
                 if(btn.dataset.target === viewId) {
                     btn.className = "nav-btn px-5 py-1.5 rounded-full text-sm font-semibold transition bg-white text-black shadow-md";
                 } else {
                     btn.className = "nav-btn px-5 py-1.5 rounded-full text-sm font-medium transition bg-white/5 hover:bg-white/20 text-white";
+                }
+            });
+
+            // Atualiza botões da navbar Mobile
+            document.querySelectorAll('.mobile-nav-btn').forEach(btn => {
+                if(btn.dataset.target === viewId) {
+                    btn.classList.add('text-white');
+                    btn.classList.remove('text-gray-500');
+                } else {
+                    btn.classList.remove('text-white');
+                    btn.classList.add('text-gray-500');
                 }
             });
 
@@ -373,6 +376,14 @@
             window.scrollTo(0, 0);
         };
 
+        // Função de Scroll Segura para os Carrosséis (Evita conflito com o scroll do navegador)
+        window.scrollCarousel = (btn, dir) => {
+            const track = btn.parentElement.querySelector('.carousel-track');
+            if(track) {
+                track.scrollBy({ left: dir === 'left' ? -300 : 300, behavior: 'smooth' });
+            }
+        };
+
         // --- AUTENTICAÇÃO ---
         document.getElementById('btn-login').addEventListener('click', async () => {
             try {
@@ -382,7 +393,7 @@
                     email: result.user.email, lastLogin: Date.now() 
                 }, { merge: true });
             } catch (error) {
-                alert("Erro no login: " + error.message);
+                alert("Erro no login: " + error.message + "\n(Dica: Se estiver visualizando como prévia, abra numa aba completa)");
             }
         });
 
@@ -412,15 +423,13 @@
         };
 
         const subscribeData = () => {
-            unsubscribeAll(); // limpa anteriores
+            unsubscribeAll();
             
-            // Contents
             unsubscribeList.push(onSnapshot(collection(db, "content"), snap => {
                 dbContents = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 if (document.getElementById('home-view').classList.contains('active')) renderHome();
             }));
 
-            // Carousels
             unsubscribeList.push(onSnapshot(collection(db, "carousels"), snap => {
                 dbCarousels = snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'normal' }));
             }));
@@ -527,41 +536,62 @@
             let current = 0;
             const container = document.getElementById('hero-container');
             
-            const drawHero = () => {
-                const item = items[current];
-                container.innerHTML = `
-                    <div class="absolute inset-0 w-full h-full animate-fade-in">
+            // Renderiza todos os slides de uma vez (para permitir a transição cruzada suave)
+            let html = '';
+            items.forEach((item, index) => {
+                html += `
+                    <div id="hero-slide-${index}" class="absolute inset-0 w-full h-full transition-opacity duration-1000 ease-in-out ${index === 0 ? 'opacity-100 z-10' : 'opacity-0 z-0'}">
                         <img src="${resolveImg(item.backdrop || item.poster)}" class="w-full h-full object-cover object-top opacity-70">
                         <div class="absolute inset-0 bg-gradient-to-r from-[#050505] via-[#050505]/90 md:via-[#050505]/60 to-transparent w-full md:w-3/4"></div>
                         <div class="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/30 to-transparent"></div>
-                    </div>
-                    <div class="relative z-20 w-full px-6 md:px-16 pt-20 flex justify-between items-center animate-slide-right">
-                        <div class="max-w-2xl">
-                            <h1 class="text-white font-black text-4xl md:text-6xl uppercase tracking-tighter mb-4 drop-shadow-lg impact-title text-orange-500">${item.title}</h1>
-                            <div class="flex flex-wrap items-center gap-3 text-xs font-semibold mb-6 text-gray-300">
-                                <span class="bg-white/20 text-white px-2 py-0.5 rounded text-[10px]">${item.type === 'tv' ? 'SÉRIE' : 'FILME'}</span>
-                                <span class="text-orange-500 text-lg leading-none">•</span>
-                                <span>${item.year}</span>
-                            </div>
-                            <p class="text-gray-300 text-xs md:text-base mb-8 leading-relaxed max-w-md line-clamp-3">${item.synopsis || "Nenhuma sinopse disponível."}</p>
-                            <div class="flex gap-4">
-                                <button onclick='playContent("${item.id}")' class="bg-white text-black px-8 py-3 rounded-xl hover:bg-orange-500 hover:text-white transition-colors flex items-center justify-center gap-2 font-bold text-sm shadow-[0_0_15px_rgba(255,255,255,0.2)] hover:shadow-[0_0_20px_rgba(249,115,22,0.5)]">
-                                    <i class="ph-fill ph-play text-lg"></i> Assistir
-                                </button>
-                                <button onclick='openDetails("${item.id}")' class="glass-panel text-white px-8 py-3 rounded-xl hover:bg-white/20 transition flex items-center justify-center gap-2 font-bold text-sm">
-                                   Detalhes
-                                </button>
+                        
+                        <div class="relative z-20 w-full h-full px-6 md:px-16 pt-20 flex justify-between items-center">
+                            <div class="max-w-2xl animate-slide-up">
+                                <h1 class="text-white font-black text-4xl md:text-6xl uppercase tracking-tighter mb-4 drop-shadow-lg impact-title text-orange-500">${item.title}</h1>
+                                <div class="flex flex-wrap items-center gap-3 text-xs font-semibold mb-6 text-gray-300">
+                                    <span class="bg-white/20 text-white px-2 py-0.5 rounded text-[10px]">${item.type === 'tv' ? 'SÉRIE' : 'FILME'}</span>
+                                    <span class="text-orange-500 text-lg leading-none">•</span>
+                                    <span>${item.year}</span>
+                                </div>
+                                <p class="text-gray-300 text-xs md:text-base mb-8 leading-relaxed max-w-md line-clamp-3">${item.synopsis || "Nenhuma sinopse disponível."}</p>
+                                <div class="flex gap-4">
+                                    <button onclick='playContent("${item.id}")' class="bg-white text-black px-8 py-3 rounded-xl hover:bg-orange-500 hover:text-white transition-colors flex items-center justify-center gap-2 font-bold text-sm shadow-[0_0_15px_rgba(255,255,255,0.2)] hover:shadow-[0_0_20px_rgba(249,115,22,0.5)]">
+                                        <i class="ph-fill ph-play text-lg"></i> Assistir
+                                    </button>
+                                    <button onclick='openDetails("${item.id}")' class="glass-panel text-white px-8 py-3 rounded-xl hover:bg-white/20 transition flex items-center justify-center gap-2 font-bold text-sm">
+                                       Detalhes
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 `;
+            });
+
+            // Bolinhas de navegação
+            html += `<div class="absolute bottom-10 right-10 z-30 hidden md:flex gap-2">`;
+            items.forEach((_, index) => {
+                html += `<button id="hero-dot-${index}" onclick="setHeroSlide(${index})" class="w-2 h-2 rounded-full transition-all ${index === 0 ? 'bg-white w-6' : 'bg-gray-600 hover:bg-gray-400'}"></button>`;
+            });
+            html += `</div>`;
+            
+            container.innerHTML = html;
+
+            window.setHeroSlide = (index) => {
+                document.getElementById(`hero-slide-${current}`).classList.replace('opacity-100', 'opacity-0');
+                document.getElementById(`hero-slide-${current}`).classList.replace('z-10', 'z-0');
+                document.getElementById(`hero-dot-${current}`).className = "w-2 h-2 rounded-full transition-all bg-gray-600 hover:bg-gray-400";
+                
+                current = index;
+                
+                document.getElementById(`hero-slide-${current}`).classList.replace('opacity-0', 'opacity-100');
+                document.getElementById(`hero-slide-${current}`).classList.replace('z-0', 'z-10');
+                document.getElementById(`hero-dot-${current}`).className = "w-2 h-2 rounded-full transition-all bg-white w-6";
             };
 
-            drawHero();
             if(heroInterval) clearInterval(heroInterval);
             heroInterval = setInterval(() => {
-                current = (current + 1) % items.length;
-                drawHero();
+                window.setHeroSlide((current + 1) % items.length);
             }, 8000);
         };
 
@@ -597,9 +627,18 @@
                     <h2 class="text-lg md:text-xl font-bold text-white mb-4 flex items-center gap-2 animate-slide-up">
                         ${title} <i class="ph-bold ph-caret-right text-gray-500"></i>
                     </h2>
-                    <div class="flex gap-4 overflow-x-auto scrollbar-hide pb-4 snap-x relative z-10" style="scroll-behavior: smooth;">
+                    
+                    <button onclick="scrollCarousel(this, 'left')" class="hidden md:flex absolute left-0 top-10 bottom-0 z-40 w-12 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-[#050505] to-transparent">
+                        <i class="ph-bold ph-caret-left text-white hover:scale-125 transition text-3xl"></i>
+                    </button>
+                    
+                    <div class="flex gap-4 overflow-x-auto scrollbar-hide pb-4 snap-x relative z-10 carousel-track" style="scroll-behavior: smooth;">
                         ${cardsHTML}
                     </div>
+                    
+                    <button onclick="scrollCarousel(this, 'right')" class="hidden md:flex absolute right-0 top-10 bottom-0 z-40 w-12 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-[#050505] to-transparent">
+                        <i class="ph-bold ph-caret-right text-white hover:scale-125 transition text-3xl"></i>
+                    </button>
                 </div>
             `;
         };
@@ -618,7 +657,6 @@
             grid.innerHTML = html;
         };
 
-        // EXPOSTAS GLOBALMENTE PARA ONCLICK
         window.openDetails = (id) => {
             const item = dbContents.find(c => c.id === id);
             if(item) switchView('details', item);
@@ -666,7 +704,7 @@
                 sel.innerHTML = seasons.map(s => `<option value="${s}">Temporada ${s}</option>`).join('');
                 sel.onchange = (e) => renderEpisodes(item, Number(e.target.value));
                 
-                renderEpisodes(item, seasons[0]);
+                if (seasons.length > 0) renderEpisodes(item, seasons[0]);
             } else {
                 epSection.classList.add('hidden');
             }
@@ -728,7 +766,6 @@
             switchView('details', currentItem);
         };
 
-        // Lógica Custom Player
         document.getElementById('btn-play-pause').addEventListener('click', () => {
             if(videoEl.paused) videoEl.play(); else videoEl.pause();
             resetControlsTimer();
@@ -763,7 +800,6 @@
             resetControlsTimer();
         });
 
-        // Hide controls after 3 seconds of inactivity
         const resetControlsTimer = () => {
             playerControls.classList.remove('opacity-0', 'pointer-events-none');
             if (controlsTimeout) clearTimeout(controlsTimeout);
